@@ -1,13 +1,28 @@
 import type { ImageData } from "./types";
 import { Result } from "better-result";
+import { GitHubAPIError } from "./errors";
 import { log } from "./log";
 
 // Retry config for file downloads: 3 attempts with exponential backoff starting at 5s.
+// Only retry transient errors (network, 5xx). Deterministic failures like
+// size-limit violations and 4xx client errors are not retried.
 const RETRY_CONFIG = {
   times: 3,
   delayMs: 5000,
   backoff: "exponential" as const,
+  shouldRetry: (err: unknown) => {
+    const message = err instanceof Error ? err.message : "";
+    if (message.includes("Attachment too large")) return false;
+    // "HTTP 4xx" errors are client errors that won't change on retry
+    const httpMatch = message.match(/^HTTP (\d+)$/);
+    if (httpMatch && Number(httpMatch[1]) >= 400 && Number(httpMatch[1]) < 500) return false;
+    return true;
+  },
 };
+
+// Maximum attachment size (20 MB). Prevents unbounded memory usage from
+// very large files that would be base64-encoded into the prompt.
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 // Extracts GitHub user-attachments (images/files) from comment markdown
 // and converts them to base64 for the AI prompt
@@ -77,24 +92,42 @@ async function downloadFile(
   accessToken: string,
 ): Promise<{ mime: string; content: string } | null> {
   const result = await Result.tryPromise(
-    async () => {
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/vnd.github.v3+json",
-        },
-      });
+    {
+      try: async () => {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/vnd.github.v3+json",
+          },
+        });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-      const contentType = response.headers.get("content-type") || "application/octet-stream";
-      const arrayBuffer = await response.arrayBuffer();
-      const base64 = arrayBufferToBase64(arrayBuffer);
-      const mime = contentType.startsWith("image/") ? contentType : "text/plain";
+        // Check Content-Length before downloading the body to reject oversized files early
+        const contentLength = parseInt(response.headers.get("content-length") ?? "0", 10);
+        if (contentLength > MAX_ATTACHMENT_BYTES) {
+          throw new Error(
+            `Attachment too large: ${contentLength} bytes exceeds ${MAX_ATTACHMENT_BYTES} byte limit`,
+          );
+        }
 
-      return { mime, content: base64 };
+        const contentType = response.headers.get("content-type") || "application/octet-stream";
+        const arrayBuffer = await response.arrayBuffer();
+
+        // Also check actual size (Content-Length can be missing or inaccurate)
+        if (arrayBuffer.byteLength > MAX_ATTACHMENT_BYTES) {
+          throw new Error(
+            `Attachment too large: ${arrayBuffer.byteLength} bytes exceeds ${MAX_ATTACHMENT_BYTES} byte limit`,
+          );
+        }
+        const base64 = arrayBufferToBase64(arrayBuffer);
+        const mime = contentType.startsWith("image/") ? contentType : "text/plain";
+
+        return { mime, content: base64 };
+      },
+      catch: (e) => new GitHubAPIError({ operation: "downloadFile", cause: e }),
     },
     { retry: RETRY_CONFIG },
   );
