@@ -12,7 +12,7 @@ import {
 import { createLogger, sanitizeSecrets, type Logger } from "./log";
 import { emitMetric } from "./metrics";
 import { createOctokitForRepo, type InstallationSource, type InstallationLookup } from "./oidc";
-import { WORKFLOW_POLL_INTERVAL_SECS, MAX_WORKFLOW_TRACKING_MS } from "./constants";
+import { WORKFLOW_POLL_INTERVAL_SECS, DEFAULT_MAX_WORKFLOW_TRACKING_MS } from "./constants";
 
 export interface CheckStatusPayload {
   runId: number;
@@ -121,23 +121,24 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
     });
   }
 
-  // Returns owner/repo parsed from this.name if not yet persisted in state.
-  // Used by setInstallationId to persist identity in a single setState call.
-  private identityPatch(): { owner?: string; repo?: string } {
-    if (this.state.owner && this.state.repo) return {};
-    try {
-      const parts = this.name.split("/");
-      if (parts[0] && parts[1]) return { owner: parts[0], repo: parts[1] };
-    } catch {
-      // this.name unavailable (alarm wakeup) — state should already have it
-    }
-    return {};
-  }
-
   async setInstallationId(id: number, source: InstallationSource): Promise<void> {
+    // Persist owner/repo from this.name if not yet in state, so alarm wakeups
+    // can identify the repo without relying on setName().
+    let owner: string | undefined;
+    let repo: string | undefined;
+    if (!this.state.owner || !this.state.repo) {
+      try {
+        const parts = this.name.split("/");
+        owner = parts[0] || undefined;
+        repo = parts[1] || undefined;
+      } catch {
+        // this.name unavailable (alarm wakeup) — state should already have it
+      }
+    }
     this.setState({
       ...this.state,
-      ...this.identityPatch(),
+      ...(owner && { owner }),
+      ...(repo && { repo }),
       installationId: id,
       installationSource: source,
     });
@@ -176,6 +177,18 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
       ...this.state,
       activeRuns: remainingRuns,
       recentlyFinalizedRuns: recentlyFinalized,
+    });
+  }
+
+  // Best-effort reschedule of the polling safety net. If scheduling fails,
+  // the workflow_run webhook acts as the secondary safety net.
+  private reschedule(log: Logger, payload: CheckStatusPayload): void {
+    this.schedule<CheckStatusPayload>(
+      WORKFLOW_POLL_INTERVAL_SECS,
+      "checkWorkflowStatus",
+      payload,
+    ).catch((error) => {
+      log.errorWithException("run_reschedule_failed", error);
     });
   }
 
@@ -219,30 +232,61 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
     }
   }
 
-  async finalizeRun(runId: number, status: string): Promise<void> {
+  async finalizeRun(
+    runId: number,
+    status: string,
+    fallbackIssueNumber?: number,
+    fallbackRunUrl?: string,
+    actor?: string,
+  ): Promise<void> {
     const run = this.state.activeRuns[runId];
-    const log = this.logger(runId, run?.issueNumber);
+    const issueNumber = run?.issueNumber ?? fallbackIssueNumber;
+    const log = this.logger(runId, issueNumber);
 
-    log.info("run_finalizing", { status });
+    log.info("run_finalizing", { status, has_active_run: !!run });
 
+    // Run was never tracked or was already removed (e.g., polling timeout
+    // removed it before the action's finalize step arrived). For non-success
+    // statuses, attempt to post a failure comment using fallback context from
+    // the finalize request. Previously this returned silently, causing the
+    // bug where failed runs produced no user-visible feedback.
     if (!run) {
-      log.info("run_already_finalized");
+      if (status === "success" || !issueNumber || !fallbackRunUrl) {
+        log.info("run_already_finalized", {
+          has_issue_number: !!issueNumber,
+          has_run_url: !!fallbackRunUrl,
+        });
+        return;
+      }
+      log.warn("run_not_active_posting_failure", {
+        recently_finalized: !!this.state.recentlyFinalizedRuns?.[runId],
+      });
+      await this.postFailureComment(
+        runId,
+        fallbackRunUrl,
+        issueNumber,
+        status,
+        undefined,
+        undefined,
+        actor,
+      );
       return;
     }
 
     this.removeAndRecordRun(runId);
 
-    // Post failure comment + reaction for any non-success status.
+    if (status === "success") {
+      log.info("run_completed_no_comment", { status });
+      return;
+    }
+
+    // Post failure comment for any non-success status.
     // The finalize step's conditions guarantee it only runs when the OpenCode
     // step was expected to execute, so "skipped" means an infrastructure step
     // failed and should be treated as a failure. The finalize script remaps
     // "skipped" -> "failure" client-side, but we also handle it here as
     // defense-in-depth.
-    if (status !== "success") {
-      await this.postFailureComment(runId, run.runUrl, run.issueNumber, status, run);
-    } else {
-      log.info("run_completed_no_comment", { status });
-    }
+    await this.postFailureComment(runId, run.runUrl, run.issueNumber, status, run);
   }
 
   async checkWorkflowStatus(payload: CheckStatusPayload): Promise<void> {
@@ -258,10 +302,12 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
     log.info("run_status_checking");
 
     const elapsed = Date.now() - createdAt;
-    if (elapsed > MAX_WORKFLOW_TRACKING_MS) {
+    const override = Number(this.env.BONK_MAX_TRACK_SECS);
+    const maxTrackingMs = override > 0 ? override * 1000 : DEFAULT_MAX_WORKFLOW_TRACKING_MS;
+    if (elapsed > maxTrackingMs) {
       log.warn("run_timed_out", {
         elapsed_ms: elapsed,
-        max_tracking_ms: MAX_WORKFLOW_TRACKING_MS,
+        max_tracking_ms: maxTrackingMs,
       });
       this.removeAndRecordRun(runId);
       await this.postFailureComment(runId, runUrl, issueNumber, "timeout", payload);
@@ -273,89 +319,68 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
       octokit = await this.getOctokit();
     } catch (error) {
       log.errorWithException("run_octokit_failed", error);
-      try {
-        await this.schedule<CheckStatusPayload>(
-          WORKFLOW_POLL_INTERVAL_SECS,
-          "checkWorkflowStatus",
-          payload,
-        );
-      } catch (scheduleError) {
-        log.errorWithException("run_reschedule_failed", scheduleError);
-      }
+      this.reschedule(log, payload);
       return;
     }
 
+    let status: { status: string; conclusion: string | null };
     try {
-      const status = await getWorkflowRunStatus(octokit, this.owner, this.repo, runId);
-
-      log.info("run_status_fetched", {
-        status: status.status,
-        conclusion: status.conclusion,
-      });
-
-      if (status.status === "completed") {
-        this.removeAndRecordRun(runId);
-
-        // On success, OpenCode posts the response - we stay silent
-        if (status.conclusion !== "success") {
-          await this.postFailureComment(
-            runId,
-            runUrl,
-            issueNumber,
-            status.conclusion,
-            payload,
-            octokit,
-          );
-        } else {
-          log.info("run_succeeded");
-        }
-      } else {
-        // Detect "waiting" status (pending approval from a maintainer).
-        // Post a one-time comment so the user isn't left wondering. If the run
-        // later completes, postFailureComment edits this comment in-place.
-        if (status.status === "waiting" && !payload.waitingCommentPosted) {
-          log.info("run_waiting_for_approval");
-          try {
-            const commentId = await createComment(
-              octokit,
-              this.owner,
-              this.repo,
-              issueNumber,
-              `Bonk workflow is waiting for approval from a maintainer before it can run.\n\n[Approve workflow run](${runUrl})`,
-            );
-            payload = { ...payload, waitingCommentPosted: true, waitingCommentId: commentId };
-          } catch (commentError) {
-            log.errorWithException("run_waiting_comment_failed", commentError);
-            // Mark as posted even on failure to avoid a retry loop on
-            // transient API errors — the comment is best-effort.
-            payload = { ...payload, waitingCommentPosted: true };
-          }
-          const activeRuns = { ...this.state.activeRuns, [runId]: payload };
-          this.setState({ ...this.state, activeRuns });
-        }
-
-        try {
-          await this.schedule<CheckStatusPayload>(
-            WORKFLOW_POLL_INTERVAL_SECS,
-            "checkWorkflowStatus",
-            payload,
-          );
-        } catch (scheduleError) {
-          log.errorWithException("run_reschedule_failed", scheduleError);
-        }
-      }
+      status = await getWorkflowRunStatus(octokit, this.owner, this.repo, runId);
     } catch (error) {
       log.errorWithException("run_status_check_failed", error);
-      try {
-        await this.schedule<CheckStatusPayload>(
-          WORKFLOW_POLL_INTERVAL_SECS,
-          "checkWorkflowStatus",
-          payload,
-        );
-      } catch (scheduleError) {
-        log.errorWithException("run_reschedule_failed", scheduleError);
-      }
+      this.reschedule(log, payload);
+      return;
     }
+
+    log.info("run_status_fetched", {
+      status: status.status,
+      conclusion: status.conclusion,
+    });
+
+    // Run finished — finalize and optionally post a failure comment.
+    if (status.status === "completed") {
+      this.removeAndRecordRun(runId);
+      if (status.conclusion === "success") {
+        log.info("run_succeeded");
+        return;
+      }
+      await this.postFailureComment(
+        runId,
+        runUrl,
+        issueNumber,
+        status.conclusion,
+        payload,
+        octokit,
+      );
+      return;
+    }
+
+    // Detect "waiting" status (pending approval from a maintainer).
+    // Post a one-time comment so the user isn't left wondering. If the run
+    // later completes, postFailureComment edits this comment in-place.
+    if (status.status === "waiting" && !payload.waitingCommentPosted) {
+      log.info("run_waiting_for_approval");
+      try {
+        const commentId = await createComment(
+          octokit,
+          this.owner,
+          this.repo,
+          issueNumber,
+          `Bonk workflow is waiting for approval from a maintainer before it can run.\n\n[Approve workflow run](${runUrl})`,
+        );
+        payload = { ...payload, waitingCommentPosted: true, waitingCommentId: commentId };
+      } catch (commentError) {
+        log.errorWithException("run_waiting_comment_failed", commentError);
+        // Mark as posted even on failure to avoid a retry loop on
+        // transient API errors — the comment is best-effort.
+        payload = { ...payload, waitingCommentPosted: true };
+      }
+      const activeRuns = { ...this.state.activeRuns, [runId]: payload };
+      this.setState({ ...this.state, activeRuns });
+    }
+
+    // Still running — reschedule the next poll.
+    this.reschedule(log, payload);
   }
 
   // Handle a workflow_run.completed webhook. This is the safety net for runs
@@ -374,14 +399,14 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
   ): Promise<void> {
     const log = this.logger(runId, issueNumber);
 
-    // Run is still active -- finalize it now (the action's finalize call never arrived)
+    // Run is still active — finalize it now (the action's finalize call never arrived)
     if (this.state.activeRuns[runId]) {
       log.warn("run_finalized_by_workflow_webhook", { conclusion });
-      await this.finalizeRun(runId, conclusion ?? "failure");
+      await this.finalizeRun(runId, conclusion ?? "failure", issueNumber, runUrl, actor);
       return;
     }
 
-    // Run was already finalized through the normal path -- nothing to do
+    // Run was already finalized through the normal path — nothing to do
     if (this.state.recentlyFinalizedRuns?.[runId]) {
       log.info("workflow_run_already_finalized");
       return;
@@ -395,21 +420,9 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
       issue_number: issueNumber,
     });
 
-    // If we have an issue number (from pull_requests in the webhook payload),
-    // post a failure comment so the user gets feedback.
-    // postFailureComment emits its own metric, so we only emit here for the
-    // no-issue-number path to avoid double-counting.
-    if (issueNumber) {
-      await this.postFailureComment(
-        runId,
-        runUrl,
-        issueNumber,
-        conclusion,
-        undefined,
-        undefined,
-        actor,
-      );
-    } else {
+    // Without an issue number (fork PRs, workflow_dispatch), we can't post a
+    // comment — emit a metric so the failure is still observable.
+    if (!issueNumber) {
       emitMetric(this.env, {
         repo: `${this.owner}/${this.repo}`,
         eventType: "finalize",
@@ -417,7 +430,21 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
         errorCode: `untracked: ${conclusion ?? "unknown"}`,
         runId,
       });
+      return;
     }
+
+    // Post a failure comment so the user gets feedback.
+    // postFailureComment emits its own metric, so we skip here to avoid
+    // double-counting.
+    await this.postFailureComment(
+      runId,
+      runUrl,
+      issueNumber,
+      conclusion,
+      undefined,
+      undefined,
+      actor,
+    );
   }
 
   private pruneRecentlyFinalized(): Record<number, number> {
@@ -442,15 +469,6 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
       }
     }
     return pruned;
-  }
-
-  // Returns the state key for looking up / storing a failure comment.
-  // Review thread triggers get a per-thread key; everything else is per-issue.
-  private failureCommentKey(issueNumber: number, run?: CheckStatusPayload): string {
-    if (run?.reactionTargetType === "pull_request_review_comment" && run.reactionTargetId) {
-      return `rc:${run.reactionTargetId}`;
-    }
-    return `i:${issueNumber}`;
   }
 
   private storeFailureComment(
@@ -514,9 +532,10 @@ export class RepoAgent extends Agent<Env, RepoAgentState> {
     const log = this.logger(runId, issueNumber);
     const effectiveActor = run?.actor ?? actor;
     const body = this.buildFailureBody(conclusion, runUrl, effectiveActor);
-    const key = this.failureCommentKey(issueNumber, run);
     const isReviewThread =
       run?.reactionTargetType === "pull_request_review_comment" && run.reactionTargetId;
+    // Review thread triggers get a per-thread key; everything else is per-issue.
+    const key = isReviewThread ? `rc:${run.reactionTargetId}` : `i:${issueNumber}`;
 
     // Emit workflow-failure metric unconditionally — callers in
     // handleWorkflowRunCompleted rely on this firing for every failure.
