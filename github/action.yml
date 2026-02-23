@@ -160,6 +160,17 @@ runs:
       run: |
         git config --global user.name "ask-bonk[bot]"
         git config --global user.email "ask-bonk[bot]@users.noreply.github.com"
+        # Replace the GITHUB_TOKEN credential that actions/checkout persists in
+        # local git config. Pushes authenticated with GITHUB_TOKEN don't trigger
+        # downstream workflows (by design). The App installation token obtained
+        # via OIDC exchange does trigger them.
+        if [ -n "${GH_TOKEN}" ]; then
+          server_url="${GITHUB_SERVER_URL:-https://github.com}"
+          host="${server_url#https://}"
+          host="${host#http://}"
+          git config --unset-all "http.${server_url}/.extraheader" 2>/dev/null || true
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@${host}/${GITHUB_REPOSITORY}.git"
+        fi
 
     - name: Run opencode
       if: |
