@@ -710,8 +710,8 @@ describe("Workflow Run Event Parsing", () => {
     expect(parseWorkflowRunEvent(payload)).toBeNull();
   });
 
-  // Conclusion allowlist: failure, cancelled, timed_out, action_required are parsed.
-  // Everything else returns null.
+  // Conclusion allowlist: failure, cancelled, timed_out, action_required are
+  // parsed. Everything else returns null.
   it.each([
     { conclusion: "failure", parsed: true },
     { conclusion: "cancelled", parsed: true },
