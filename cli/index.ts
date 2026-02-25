@@ -107,6 +107,20 @@ function renderTemplate(template: string, vars: Record<string, string>): string 
   return result;
 }
 
+// Build a GitHub Actions `if` fragment that short-circuits before checkout
+// when the comment body doesn't contain any of the configured mentions.
+function buildMentionsCheck(mentions: string): string {
+  if (!mentions) return "";
+  const parts = mentions
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "";
+  const checks = parts.map((m) => `contains(github.event.comment.body, '${m}')`);
+  const expr = checks.length === 1 ? checks[0] : `(${checks.join(" || ")})`;
+  return ` && ${expr}`;
+}
+
 async function selectProvider(): Promise<ProviderConfig> {
   const provider = (await p.select({
     message: "Select your LLM provider",
@@ -379,6 +393,7 @@ async function runWorkflow(
       MODEL: config.model,
       KEY_NAME: config.keyName,
       MENTIONS: config.mentions || "",
+      MENTIONS_CHECK: buildMentionsCheck(config.mentions || ""),
       PROMPT: config.prompt || "",
       CRON: config.cron || "0 0 * * 1",
       PERMISSIONS: config.permissions,
@@ -647,6 +662,12 @@ async function buildCustomWorkflow(providerConfig?: ProviderConfig): Promise<Wor
     const mentionsInput = await p.text({
       message: "Trigger mentions (comma-separated)",
       initialValue: `${BOT_COMMAND},${BOT_MENTION}`,
+      validate: (v) => {
+        if (!v || v.length === 0) return "At least one mention is required";
+        if (/[^a-zA-Z0-9@\/,\s._-]/.test(v))
+          return "Mentions may only contain letters, numbers, @, /, -, _, .";
+        return undefined;
+      },
     });
     if (p.isCancel(mentionsInput)) {
       p.cancel("Operation cancelled.");
