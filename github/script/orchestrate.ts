@@ -220,26 +220,48 @@ async function checkSetup(): Promise<boolean> {
   }
 
   const apiBase = getApiBaseUrl();
+  const setupUrl = `${apiBase}/api/github/setup`;
+  const setupTimeoutMs = 4000;
+  const setupRetries = 2;
+  const setupBaseDelayMs = 1000;
+
+  core.info(`Checking setup for ${owner}/${repo}#${issueNumber}`);
 
   let response: Response;
   try {
-    response = await fetchWithRetry(`${apiBase}/api/github/setup`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${oidcToken}`,
-        "Content-Type": "application/json",
+    response = await fetchWithRetry(
+      setupUrl,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${oidcToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          owner,
+          repo,
+          issue_number: issueNumber,
+          default_branch: defaultBranch,
+        }),
       },
-      body: JSON.stringify({
-        owner,
-        repo,
-        issue_number: issueNumber,
-        default_branch: defaultBranch,
-      }),
-    });
+      {
+        timeoutMs: setupTimeoutMs,
+        retries: setupRetries,
+        baseDelayMs: setupBaseDelayMs,
+        onRetry: ({ attempt, maxAttempts, delayMs, statusCode, error }) => {
+          const reason = statusCode !== undefined ? `status ${statusCode}` : error;
+          core.warning(
+            `Setup check retry ${attempt}/${maxAttempts} in ${delayMs}ms (${reason || "unknown error"})`,
+          );
+        },
+      },
+    );
   } catch (error) {
-    core.setFailed(`Setup request failed: ${error}`);
+    core.setFailed(`Setup request failed after ${setupRetries + 1} attempts: ${error}`);
     return true;
   }
+
+  core.info(`Setup check completed with status ${response.status}`);
 
   if (!response.ok) {
     const text = await response.text();
