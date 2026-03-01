@@ -21,6 +21,9 @@ import {
   handleExchangeTokenWithPAT,
 } from "../src/oidc";
 import { sanitizeSecrets } from "../src/log";
+import { queryAnalyticsEngine, emitMetric } from "../src/metrics";
+import { verifyWebhook, createWebhooks } from "../src/github";
+import { GitHubAPIError, MetricsError } from "../src/errors";
 import type { Env } from "../src/types";
 import type {
   ScheduleEventPayload,
@@ -909,6 +912,119 @@ describe("PAT Exchange Security", () => {
     if (result.isErr()) {
       expect(result.error.message).toContain("Missing owner or repo");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhook Verification I/O Boundary
+// ---------------------------------------------------------------------------
+
+describe("Webhook Verification", () => {
+  it("returns error Result for missing webhook headers", async () => {
+    const env = createMockEnv();
+    const webhooks = createWebhooks(env);
+
+    // Request with no GitHub webhook headers
+    const request = new Request("https://example.com/webhooks", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const result = await verifyWebhook(webhooks, request);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(GitHubAPIError.is(result.error)).toBe(true);
+      expect(result.error.message).toContain("Missing required webhook headers");
+      expect(result.error.operation).toBe("verifyWebhook");
+    }
+  });
+
+  it("returns error Result for invalid signature", async () => {
+    const env = createMockEnv();
+    const webhooks = createWebhooks(env);
+
+    // Request with headers but bad signature
+    const request = new Request("https://example.com/webhooks", {
+      method: "POST",
+      headers: {
+        "x-github-delivery": "test-delivery-id",
+        "x-github-event": "issue_comment",
+        "x-hub-signature-256": "sha256=invalid",
+      },
+      body: JSON.stringify({ action: "created" }),
+    });
+
+    const result = await verifyWebhook(webhooks, request);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(GitHubAPIError.is(result.error)).toBe(true);
+      expect(result.error.operation).toBe("verifyWebhook");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Analytics Engine Query I/O Boundary
+// ---------------------------------------------------------------------------
+
+describe("Analytics Engine Query", () => {
+  it("returns MetricsError when not configured", async () => {
+    const env = createMockEnv({
+      CLOUDFLARE_ACCOUNT_ID: undefined as unknown as string,
+      ANALYTICS_TOKEN: undefined as unknown as string,
+    });
+
+    const result = await queryAnalyticsEngine(env, "SELECT 1");
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(MetricsError.is(result.error)).toBe(true);
+      expect(result.error.message).toContain("not configured");
+      expect(result.error.operation).toBe("queryAnalyticsEngine");
+    }
+  });
+
+  it("returns MetricsError when account ID is missing", async () => {
+    const env = createMockEnv({
+      CLOUDFLARE_ACCOUNT_ID: undefined as unknown as string,
+      ANALYTICS_TOKEN: "test-token",
+    });
+
+    const result = await queryAnalyticsEngine(env, "SELECT 1");
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(MetricsError.is(result.error)).toBe(true);
+    }
+  });
+
+  it("returns MetricsError when token is missing", async () => {
+    const env = createMockEnv({
+      CLOUDFLARE_ACCOUNT_ID: "test-account",
+      ANALYTICS_TOKEN: undefined as unknown as string,
+    });
+
+    const result = await queryAnalyticsEngine(env, "SELECT 1");
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(MetricsError.is(result.error)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Metrics Emit (best-effort, never throws)
+// ---------------------------------------------------------------------------
+
+describe("Metrics Emit", () => {
+  it("does not throw when BONK_EVENTS binding is missing", () => {
+    const env = createMockEnv();
+    // emitMetric should be best-effort — no exception even with missing binding
+    expect(() => {
+      emitMetric(env, {
+        repo: "test-owner/test-repo",
+        eventType: "webhook",
+        status: "success",
+      });
+    }).not.toThrow();
   });
 });
 
