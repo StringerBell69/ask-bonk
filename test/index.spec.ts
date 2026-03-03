@@ -19,6 +19,7 @@ import {
   extractBearerToken,
   handleExchangeTokenForRepo,
   handleExchangeTokenWithPAT,
+  resolvePermissions,
 } from "../src/oidc";
 import { sanitizeSecrets } from "../src/log";
 import { queryAnalyticsEngine, emitMetric } from "../src/metrics";
@@ -1025,6 +1026,153 @@ describe("Metrics Emit", () => {
         status: "success",
       });
     }).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Token Permission Scoping
+// ---------------------------------------------------------------------------
+
+describe("resolvePermissions", () => {
+  const DEFAULTS = {
+    contents: "write",
+    issues: "write",
+    pull_requests: "write",
+    metadata: "read",
+  };
+
+  // --- no input / fallback ---
+
+  it("returns defaults when no permissions provided", () => {
+    expect(resolvePermissions()).toEqual(DEFAULTS);
+  });
+
+  it("returns defaults for undefined input", () => {
+    expect(resolvePermissions(undefined)).toEqual(DEFAULTS);
+  });
+
+  it("returns defaults for empty object", () => {
+    expect(resolvePermissions({})).toEqual(DEFAULTS);
+  });
+
+  // --- preset names ---
+
+  it("resolves NO_PUSH preset", () => {
+    expect(resolvePermissions("NO_PUSH")).toEqual({
+      contents: "read",
+      issues: "write",
+      pull_requests: "write",
+      metadata: "read",
+    });
+  });
+
+  it("resolves WRITE preset (matches defaults)", () => {
+    expect(resolvePermissions("WRITE")).toEqual(DEFAULTS);
+  });
+
+  it("resolves presets case-insensitively", () => {
+    // Action inputs arrive as strings — test that runtime handles mixed case
+    expect(resolvePermissions("no_push" as any)).toEqual(resolvePermissions("NO_PUSH"));
+    expect(resolvePermissions("Write" as any)).toEqual(resolvePermissions("WRITE"));
+  });
+
+  it("falls back to NO_PUSH for unknown preset name", () => {
+    expect(resolvePermissions("NONSENSE" as any)).toEqual({
+      contents: "read",
+      issues: "write",
+      pull_requests: "write",
+      metadata: "read",
+    });
+  });
+
+  // --- custom object: downgrade ---
+
+  it("downgrades contents from write to read", () => {
+    const result = resolvePermissions({ contents: "read" });
+    expect(result.contents).toBe("read");
+    expect(result.issues).toBe("write");
+    expect(result.pull_requests).toBe("write");
+    expect(result.metadata).toBe("read");
+  });
+
+  it("downgrades multiple permissions", () => {
+    const result = resolvePermissions({
+      contents: "read",
+      pull_requests: "read",
+    });
+    expect(result.contents).toBe("read");
+    expect(result.pull_requests).toBe("read");
+    expect(result.issues).toBe("write");
+    expect(result.metadata).toBe("read");
+  });
+
+  // --- custom object: no escalation ---
+
+  it("refuses to escalate metadata beyond its default", () => {
+    // metadata defaults to "read" — passing "write" via untrusted JSON must be clamped
+    const result = resolvePermissions({ metadata: "write" } as any);
+    expect(result.metadata).toBe("read");
+  });
+
+  it("keeps default when requested level matches", () => {
+    const result = resolvePermissions({
+      contents: "write",
+      issues: "write",
+    });
+    expect(result.contents).toBe("write");
+    expect(result.issues).toBe("write");
+  });
+
+  it("ignores unknown permission keys", () => {
+    const result = resolvePermissions({
+      contents: "read",
+      actions: "write",
+    } as any);
+    expect(result.contents).toBe("read");
+    expect((result as any).actions).toBeUndefined();
+  });
+
+  // --- invalid values from untrusted JSON ---
+
+  it("falls back to NO_PUSH for invalid string values like 'admin'", () => {
+    const NO_PUSH = { contents: "read", issues: "write", pull_requests: "write", metadata: "read" };
+    expect(resolvePermissions({ contents: "admin" } as any)).toEqual(NO_PUSH);
+  });
+
+  it("falls back to NO_PUSH for non-string values", () => {
+    const NO_PUSH = { contents: "read", issues: "write", pull_requests: "write", metadata: "read" };
+    expect(resolvePermissions({ contents: 123 } as any)).toEqual(NO_PUSH);
+  });
+
+  it("falls back to NO_PUSH when all values are invalid", () => {
+    const NO_PUSH = { contents: "read", issues: "write", pull_requests: "write", metadata: "read" };
+    const result = resolvePermissions({
+      contents: "admin",
+      issues: 123,
+      pull_requests: "banana",
+      metadata: "root",
+    } as any);
+    expect(result).toEqual(NO_PUSH);
+  });
+
+  it("applies valid keys and skips invalid ones in mixed input", () => {
+    const result = resolvePermissions({ contents: "read", issues: "banana" } as any);
+    expect(result).toEqual({
+      contents: "read",
+      issues: "write",
+      pull_requests: "write",
+      metadata: "read",
+    });
+  });
+
+  it("falls back to NO_PUSH for array input", () => {
+    const NO_PUSH = { contents: "read", issues: "write", pull_requests: "write", metadata: "read" };
+    expect(resolvePermissions(["NO_PUSH"] as any)).toEqual(NO_PUSH);
+  });
+
+  it("falls back to NO_PUSH for numeric input", () => {
+    const NO_PUSH = { contents: "read", issues: "write", pull_requests: "write", metadata: "read" };
+    expect(resolvePermissions(42 as any)).toEqual(NO_PUSH);
   });
 });
 

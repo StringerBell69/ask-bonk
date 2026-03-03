@@ -10,7 +10,14 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { getContext, getOidcToken, getApiBaseUrl, detectForkFromPR, core } from "./context";
+import {
+  getContext,
+  getOidcToken,
+  getApiBaseUrl,
+  detectForkFromPR,
+  parseTokenPermissions,
+  core,
+} from "./context";
 import { fetchWithRetry } from "./http";
 
 // ---------------------------------------------------------------------------
@@ -511,6 +518,23 @@ async function exchangeOidc(): Promise<OidcResult> {
     return oidcFailClosed(`Invalid OIDC_BASE_URL: ${error}`);
   }
 
+  // Build request body — include token_permissions if provided by the caller.
+  // Accepts a preset name (e.g., "NO_PUSH") or a JSON permissions object.
+  const exchangeBody: Record<string, unknown> = {};
+  const rawPermissions = process.env.TOKEN_PERMISSIONS;
+  if (rawPermissions?.trim()) {
+    const parsed = parseTokenPermissions(rawPermissions);
+    if (parsed !== undefined) {
+      exchangeBody.permissions = parsed;
+    } else {
+      // parseTokenPermissions returns undefined only for malformed JSON (the
+      // outer `if` already guarantees the input is non-empty after trim).
+      // Fail closed: send NO_PUSH so the server doesn't grant full defaults.
+      core.warning(`Invalid TOKEN_PERMISSIONS JSON, falling back to NO_PUSH: ${rawPermissions}`);
+      exchangeBody.permissions = "NO_PUSH";
+    }
+  }
+
   let appToken: string;
   try {
     const resp = await fetchWithRetry(
@@ -521,6 +545,7 @@ async function exchangeOidc(): Promise<OidcResult> {
           Authorization: `Bearer ${actionOidcToken}`,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify(exchangeBody),
       },
       { timeoutMs: 10000 },
     );

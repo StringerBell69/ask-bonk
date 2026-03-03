@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { detectForkFromPR } from "../github/script/context";
+import { detectForkFromPR, parseTokenPermissions } from "../github/script/context";
 import { fetchWithRetry } from "../github/script/http";
 
 describe("GitHub Action script context", () => {
@@ -36,6 +36,34 @@ describe("GitHub Action script context", () => {
       "token",
     );
     expect(result).toEqual({ isFork: true, headSha: "abc" });
+  });
+});
+
+describe("OIDC exchange permission forwarding", () => {
+  // Tests parseTokenPermissions — the function orchestrate.ts uses to parse
+  // the TOKEN_PERMISSIONS env var before forwarding to the exchange endpoint.
+
+  it("parses JSON permissions object", () => {
+    expect(parseTokenPermissions('{"contents": "read"}')).toEqual({ contents: "read" });
+  });
+
+  it("passes preset name through as a string", () => {
+    expect(parseTokenPermissions("NO_PUSH")).toBe("NO_PUSH");
+    expect(parseTokenPermissions("WRITE")).toBe("WRITE");
+  });
+
+  it("returns undefined for malformed JSON", () => {
+    expect(parseTokenPermissions("{broken")).toBeUndefined();
+  });
+
+  it("returns undefined for empty/whitespace input", () => {
+    expect(parseTokenPermissions("")).toBeUndefined();
+    expect(parseTokenPermissions("  ")).toBeUndefined();
+    expect(parseTokenPermissions(undefined)).toBeUndefined();
+  });
+
+  it("trims whitespace around preset names", () => {
+    expect(parseTokenPermissions("  NO_PUSH  ")).toBe("NO_PUSH");
   });
 });
 
