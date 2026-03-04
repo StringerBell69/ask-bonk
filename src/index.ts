@@ -339,6 +339,7 @@ apiGithub.post("/setup", async (c) => {
   }
 
   const oidcResult = await validateOIDCAndExtractRepo(oidcToken);
+  console.log(`[Setup] OIDC validation took ${Date.now() - startTime}ms`);
   if (oidcResult.isErr()) return c.json({ error: oidcResult.error.message }, 401);
 
   const { owner: claimsOwner, repo: claimsRepo } = oidcResult.value;
@@ -360,6 +361,7 @@ apiGithub.post("/setup", async (c) => {
 
   // Look up installation ID
   const installationResult = await getInstallationId(c.env, body.owner, body.repo);
+  console.log(`[Setup] Installation lookup took ${Date.now() - startTime}ms (Source: ${installationResult.isOk() ? installationResult.value.source : 'error'})`);
   if (installationResult.isErr()) {
     setupLog.error("setup_no_installation", {
       duration_ms: Date.now() - startTime,
@@ -381,6 +383,7 @@ apiGithub.post("/setup", async (c) => {
       body.repo,
       installationResult.value,
     );
+    console.log(`[Setup] Octokit creation took ${Date.now() - startTime}ms`);
     installationId = installation.id;
     installationSource = installation.source;
 
