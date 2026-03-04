@@ -3,6 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "license": "Apache-2.0",
+  "bin": {
+    "bonk": "./cli/bonk"
+  },
   "scripts": {
     "deploy": "wrangler deploy --define __VERSION__:\"\\\"$(git describe --tags --always)\\\"\" --define __COMMIT__:\"\\\"$(git rev-parse --short HEAD)\\\"\"",
     "dev": "wrangler dev",

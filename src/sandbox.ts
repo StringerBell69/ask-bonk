@@ -22,7 +22,7 @@ export async function runAsk(
   installationId: number,
   request: AskRequest,
 ): Promise<Result<ReadableStream, SandboxError | ValidationError>> {
-  const { id: askId, owner, repo, prompt, agent, model, variant, config } = request;
+  const { id: askId, owner, repo, prompt, agent, model, variant, config, fallbackModel } = request;
   const log = createLogger({
     owner,
     repo,
@@ -165,6 +165,17 @@ export async function runAsk(
     );
   }
 
+  // Parse optionally provided fallback string if provided
+  const fallbackModelString = fallbackModel;
+  let fallbackConfig: { providerID: string; modelID: string } | undefined;
+  if (fallbackModelString) {
+    const [fallbackProviderID, ...fallbackRest] = fallbackModelString.split("/");
+    const fallbackModelID = fallbackRest.join("/");
+    if (fallbackProviderID?.length && fallbackModelID.length) {
+      fallbackConfig = { providerID: fallbackProviderID, modelID: fallbackModelID };
+    }
+  }
+
   // Stream SSE events from the prompt
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -190,30 +201,41 @@ export async function runAsk(
     try {
       await sendEvent("session", { id: sessionId, askId });
 
-      const promptResultWrapped = await Result.tryPromise(
-        {
-          try: () =>
-            client.session.prompt({
-              path: { id: sessionId },
-              query: { directory: workDir },
-              body: {
-                model: { providerID, modelID },
-                agent: agent ?? undefined,
-                // variant is supported by the OpenCode API but not yet in the v1 SDK types.
-                // Safe to pass -- the SDK sends all body fields in the HTTP request.
-                ...(variant ? { variant } : {}),
-                parts: [{ type: "text", text: prompt }],
-              },
-            }),
-          catch: (e) => new SandboxError({ operation: "session.prompt", cause: e }),
-        },
-        { retry: RETRY_CONFIG },
-      );
-      if (promptResultWrapped.isErr()) throw promptResultWrapped.error;
-      const promptResult = promptResultWrapped.value;
+      const runPromptRequest = async (targetProviderID: string, targetModelID: string) => {
+        const promptResultWrapped = await Result.tryPromise(
+          {
+            try: () =>
+              client.session.prompt({
+                path: { id: sessionId },
+                query: { directory: workDir },
+                body: {
+                  model: { providerID: targetProviderID, modelID: targetModelID },
+                  agent: agent ?? undefined,
+                  // variant is supported by the OpenCode API but not yet in the v1 SDK types.
+                  // Safe to pass -- the SDK sends all body fields in the HTTP request.
+                  ...(variant ? { variant } : {}),
+                  parts: [{ type: "text", text: prompt }],
+                },
+              }),
+            catch: (e) => new SandboxError({ operation: "session.prompt", cause: e }),
+          },
+          { retry: RETRY_CONFIG },
+        );
+        if (promptResultWrapped.isErr()) throw promptResultWrapped.error;
+        return promptResultWrapped.value;
+      };
+
+      let promptResult: any;
+      try {
+        promptResult = await runPromptRequest(providerID, modelID);
+      } catch (error) {
+        if (!fallbackConfig) throw error;
+        await sendEvent("warning", { message: `Primary model (${modelString}) failed. Attempting graceful fallback to ${fallbackModelString}...` });
+        promptResult = await runPromptRequest(fallbackConfig.providerID, fallbackConfig.modelID);
+      }
 
       const parts = promptResult.data?.parts ?? [];
-      const textPart = parts.find((p) => p.type === "text");
+      const textPart = parts.find((p: any) => p.type === "text");
       const response = textPart?.type === "text" ? textPart.text : "No response";
 
       // Check for changes

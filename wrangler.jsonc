@@ -6,22 +6,23 @@
   "rules": [
     {
       "type": "Text",
-      "globs": ["**/*.hbs", "**/*.sql"],
+      "globs": [
+        "**/*.hbs",
+        "**/*.sql"
+      ],
       "fallthrough": true,
     },
   ],
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   // Build-time constants replaced by esbuild. Deploy script overrides with real values.
   "define": {
     "__VERSION__": "\"dev\"",
     "__COMMIT__": "\"unknown\"",
   },
   "observability": {
-    "enabled": true,
-    "traces": {
-      "enabled": true,
-      "head_sampling_rate": 0.1,
-    },
+    "enabled": false,
   },
   "vars": {
     // Default model for OpenCode sessions
@@ -29,7 +30,12 @@
     // ASK_SECRET: Set via wrangler secret for production
     // Empty or missing = /ask endpoint is disabled
     // Allowed orgs/users for GitHub App installation
-    "ALLOWED_ORGS": ["elithrar", "cloudflare", "ask-bonk"],
+    "ALLOWED_ORGS": [
+      "elithrar",
+      "cloudflare",
+      "ask-bonk",
+      "StringerBell69"
+    ],
   },
   // "containers": [
   // 	{
@@ -54,13 +60,16 @@
   "migrations": [
     {
       "tag": "v4",
-      "new_sqlite_classes": ["RepoAgent", "Sandbox"],
+      "new_sqlite_classes": [
+        "RepoAgent",
+        "Sandbox"
+      ],
     },
   ],
   "kv_namespaces": [
     {
       "binding": "APP_INSTALLATIONS",
-      "id": "03ef4765c3824caf9fb9b8ac31584f38",
+      "id": "bf8fb674b90c42c4bf1b9483789a5dbe",
     },
   ],
   // Rate limiter for issues events from non-write users: 5 requests per minute
@@ -72,12 +81,6 @@
         "limit": 5,
         "period": 60,
       },
-    },
-  ],
-  "analytics_engine_datasets": [
-    {
-      "binding": "BONK_EVENTS",
-      "dataset": "bonk_events",
     },
   ],
 }

@@ -9,6 +9,10 @@ inputs:
     description: "Model to use (e.g., opencode/claude-opus-4-5)"
     required: true
 
+  fallback_model:
+    description: "Optional fallback model to use if the primary model fails"
+    required: false
+
   agent:
     description: "Set the agent to use for this workflow. Falls back to the default_agent if set in config, else 'build'"
     required: false
@@ -187,12 +191,34 @@ runs:
         # GH_TOKEN is the App token written to GITHUB_ENV by the OIDC exchange step.
         export USE_GITHUB_TOKEN=true
         export GITHUB_TOKEN="${GH_TOKEN}"
+        
+        echo "Running primary model: $MODEL"
         timeout 45m opencode github run
         EXIT_CODE=$?
+        
+        if [ $EXIT_CODE -ne 0 ]; then
+          if [ -n "$FALLBACK_MODEL" ]; then
+            echo "::warning::Primary model ($MODEL) failed with exit code $EXIT_CODE. Attempting fallback to $FALLBACK_MODEL..."
+            
+            # Post a warning comment to the PR/Issue
+            if [ -n "$PR_NUMBER" ] && [ -n "$GH_TOKEN" ]; then
+                gh issue comment "$PR_NUMBER" --repo "$REPOSITORY" --body "⚠️ **Bonk Warning:** The primary model (\`$MODEL\`) failed to complete the request. Attempting graceful fallback to \`$FALLBACK_MODEL\`..." || true
+            fi
+            
+            # Re-run with the fallback model
+            export MODEL="$FALLBACK_MODEL"
+            timeout 45m opencode github run
+            EXIT_CODE=$?
+          else
+            echo "Primary model failed and no fallback_model was provided."
+          fi
+        fi
+        
         echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
         exit $EXIT_CODE
       env:
         MODEL: ${{ inputs.model }}
+        FALLBACK_MODEL: ${{ inputs.fallback_model }}
         AGENT: ${{ inputs.agent }}
         VARIANT: ${{ inputs.variant }}
         PROMPT: ${{ steps.preflight.outputs.value }}

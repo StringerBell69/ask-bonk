@@ -19,6 +19,7 @@ export interface Env {
   GITHUB_WEBHOOK_SECRET: string;
   OPENCODE_API_KEY: string;
   DEFAULT_MODEL: string;
+  FALLBACK_MODEL?: string;
   // Shared secret for /ask endpoint - empty means endpoint is disabled
   ASK_SECRET?: string;
   // Allowed orgs/users for GitHub App installation - JSON array binding
@@ -45,6 +46,7 @@ export interface AskRequest {
   prompt: string;
   agent?: string;
   model?: string;
+  fallbackModel?: string;
   // Provider-specific reasoning effort level (e.g., "high", "max", "minimal").
   // Maps to OpenCode's variant parameter on session.prompt().
   variant?: string;
