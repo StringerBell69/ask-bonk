@@ -191,6 +191,7 @@ runs:
         # GH_TOKEN is the App token written to GITHUB_ENV by the OIDC exchange step.
         export USE_GITHUB_TOKEN=true
         export GITHUB_TOKEN="${GH_TOKEN}"
+        export OPENCODE_OPTIONS='{"plugin":["@opencode-ai/plugin"]}'
         
         echo "Running primary model: $MODEL"
         timeout 45m opencode github run
@@ -235,7 +236,6 @@ runs:
         OPENCODE_API_KEY: ${{ env.OPENCODE_API_KEY }}
         OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
-        OPENCODE_OPTIONS: '{"plugin":["@opencode-ai/plugin"]}'
 
     - name: Finalize Bonk run
       if: |
