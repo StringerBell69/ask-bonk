@@ -180,6 +180,13 @@ runs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@${host}/${GITHUB_REPOSITORY}.git"
         fi
 
+    - name: Configure OpenCode Plugins
+      if: success() && steps.mentions.outputs.skip != 'true' && steps.preflight.outputs.skip != 'true'
+      shell: bash
+      run: |
+        echo '{"plugin":["@opencode-ai/plugin"]}' > opencode.json
+        echo "Created opencode.json to enable fallback providers"
+
     - name: Run opencode
       if: |
         success() && steps.mentions.outputs.skip != 'true' && steps.preflight.outputs.skip != 'true'
