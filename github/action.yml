@@ -156,9 +156,9 @@ runs:
       run: |
         set -euo pipefail
         if [ "$OPENCODE_DEV" = "true" ]; then
-          bun install -g opencode-ai@dev
+          bun install -g opencode-ai@dev @opencode-ai/plugin@latest
         else
-          bun install -g opencode-ai@latest
+          bun install -g opencode-ai@latest @opencode-ai/plugin@latest
         fi
         echo "opencode version: $(opencode version 2>/dev/null || echo 'unknown')"
 
