@@ -232,6 +232,9 @@ runs:
         # discovering and acting on a different PR.
         PR_NUMBER: ${{ github.event.issue.pull_request.url && github.event.issue.number || github.event.pull_request.number || '' }}
         ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || '' }}
+        OPENCODE_API_KEY: ${{ env.OPENCODE_API_KEY }}
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
 
     - name: Finalize Bonk run
       if: |

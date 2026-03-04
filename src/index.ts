@@ -154,6 +154,11 @@ app.post("/webhooks", async (c) => {
   return handleWebhook(c.req.raw, c.env);
 });
 
+// Alias for /webhooks to support singular /webhook configuration
+app.post("/webhook", async (c) => {
+  return handleWebhook(c.req.raw, c.env);
+});
+
 // /ask endpoint - runs OpenCode directly in the sandbox
 // Requires bearer auth with ASK_SECRET. Returns SSE stream.
 // In future, responses may be routed to other destinations (email, Discord, etc)
@@ -678,6 +683,11 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
   const startTime = Date.now();
   const requestId = ulid();
   const webhooks = createWebhooks(env);
+  
+  // Debug log for webhook secret (only first 3 chars and length)
+  const secret = env.GITHUB_WEBHOOK_SECRET || "";
+  console.log(`[Webhook] Secret length: ${secret.length}, prefix: ${secret.substring(0, 3)}...`);
+  
   const eventResult = await verifyWebhook(webhooks, request);
   if (eventResult.isErr()) {
     log.error("webhook_signature_invalid", {
