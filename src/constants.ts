@@ -45,3 +45,4 @@ export const BONK_REPO = env.BONK_REPO || "ask-bonk/ask-bonk";
 export const DEFAULT_MODEL = env.DEFAULT_MODEL || "opencode/claude-opus-4-5";
 export const BOT_MENTION = env.BOT_MENTION || "@ask-bonk";
 export const BOT_COMMAND = env.BOT_COMMAND || "/bonk";
+export const GITHUB_REPO_URL = `https://github.com/${\n  BONK_REPO.includes(\"/\") ? BONK_REPO : `ask-bonk/${BONK_REPO}`\n}`;
