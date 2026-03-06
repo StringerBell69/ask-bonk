@@ -56,6 +56,7 @@ interface WorkflowConfig {
   name: string;
   filename: string;
   model: string;
+  fallbackModel?: string;
   keyName: string;
   events: EventTrigger[];
   mentions?: string;
@@ -393,6 +394,7 @@ async function runWorkflow(
     const content = renderTemplate(template, {
       NAME: config.name,
       MODEL: config.model,
+      FALLBACK_MODEL: config.fallbackModel || "",
       KEY_NAME: config.keyName,
       MENTIONS: config.mentions || "",
       MENTIONS_CHECK: buildMentionsCheck(config.mentions || ""),
@@ -598,6 +600,7 @@ async function buildPresetWorkflow(
     name,
     filename,
     model,
+    fallbackModel,
     keyName: providerConfig?.keyName || "OPENCODE_API_KEY",
     events: presetDefaults.events!,
     mentions: presetDefaults.mentions,

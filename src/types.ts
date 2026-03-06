@@ -37,6 +37,7 @@ export interface Env {
   BOT_MENTION?: string;
   BOT_COMMAND?: string;
   GITHUB_REPO_URL?: string;
+  FALLBACK_MODEL?: string;
 }
 
 // Request body for /ask endpoint
@@ -54,6 +55,7 @@ export interface AskRequest {
   variant?: string;
   // Valid opencode.json/jsonc config to pass into the OpenCode session
   config?: Config;
+  fallbackModel?: string;
 }
 
 // Context passed through event handling

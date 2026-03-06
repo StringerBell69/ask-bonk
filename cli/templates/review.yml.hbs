@@ -68,7 +68,8 @@ echo 'body<<EOF' jq -r .body /tmp/pr_data.json echo EOF }>> $GITHUB_OUTPUT
   env:
   {{KEY_NAME}}: ${{ secrets.{{KEY_NAME}} }}
   with:
-  model: {{MODEL}}{{OIDC_BASE_URL_YML_INJECTION}}
+  model: "{{MODEL}}"
+  fallback_model: "{{FALLBACK_MODEL}}"{{OIDC_BASE_URL_YML_INJECTION}}
   mentions: '{{MENTIONS}}'
   permissions: write
   agent: reviewer
