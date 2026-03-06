@@ -404,7 +404,7 @@ async function runWorkflow(
       PROMPT: config.prompt || "",
       CRON: config.cron || "0 0 * * 1",
       PERMISSIONS: config.permissions,
-      BONK_REPO: process.env.BONK_REPO || "ask-bonk/ask-bonk",
+      BONK_REPO,
       BOT_COMMAND,
       BOT_MENTION,
       EVENTS: config.events
