@@ -1,5 +1,5 @@
 import type { Octokit } from "@octokit/rest";
-import { DEFAULT_MODEL } from "./types";
+import { DEFAULT_MODEL, type Env } from "./types";
 import {
   createComment,
   fileExists,
@@ -24,11 +24,16 @@ export interface SetupResult {
 const BOT_MENTION = "@ask-bonk";
 const BOT_COMMAND = "/bonk";
 
-function generateWorkflowContent(): string {
+function generateWorkflowContent(env: Env): string {
+  const mention = env.BOT_MENTION || BOT_MENTION;
+  const command = env.BOT_COMMAND || BOT_COMMAND;
+  const model = env.DEFAULT_MODEL || DEFAULT_MODEL;
+
   return workflowTemplate
-    .replace(/\{\{BOT_MENTION\}\}/g, BOT_MENTION)
-    .replace(/\{\{BOT_COMMAND\}\}/g, BOT_COMMAND)
-    .replace(/\{\{MODEL\}\}/g, DEFAULT_MODEL);
+    .replace(/\{\{BOT_MENTION\}\}/g, mention)
+    .replace(/\{\{BOT_COMMAND\}\}/g, command)
+    .replace(/\{\{MODEL\}\}/g, model)
+    .replace(/\{\{BONK_REPO\}\}/g, env.GITHUB_REPO_URL ? env.GITHUB_REPO_URL.replace("https://github.com/", "") : "ask-bonk/ask-bonk");
 }
 
 // Check if workflow file exists, create PR if not
@@ -48,7 +53,7 @@ export async function ensureWorkflowFile(
   }
 
   workflowLog.info("workflow_file_missing_creating_pr");
-  return await createWorkflowPR(octokit, owner, repo, issueNumber, defaultBranch);
+  return await createWorkflowPR(octokit, owner, repo, issueNumber, defaultBranch, env);
 }
 
 async function createWorkflowPR(
@@ -95,7 +100,7 @@ async function createWorkflowPR(
     }
   }
 
-  const workflowContent = generateWorkflowContent();
+  const workflowContent = generateWorkflowContent(env);
   await createOrUpdateFile(
     octokit,
     owner,

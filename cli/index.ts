@@ -28,11 +28,13 @@ import {
   waitForAppInstallation,
   workflowExists,
 } from "./github";
-
-const GITHUB_APP_URL = "https://github.com/apps/ask-bonk";
-const DEFAULT_MODEL = "opencode/claude-opus-4-5";
-const BOT_MENTION = "@ask-bonk";
-const BOT_COMMAND = "/bonk";
+import {
+  GITHUB_APP_SLUG,
+  GITHUB_APP_URL,
+  DEFAULT_MODEL,
+  BOT_MENTION,
+  BOT_COMMAND,
+} from "./constants";
 
 type ProviderChoice = "opencode-zen" | "anthropic" | "openai" | "other";
 type WorkflowPreset = "bonk" | "scheduled" | "triage" | "review" | "custom";
@@ -67,7 +69,7 @@ const PROVIDERS: Record<ProviderChoice, { name: string; keyName: string; default
   "opencode-zen": {
     name: "OpenCode Zen",
     keyName: "OPENCODE_API_KEY",
-    defaultModel: "opencode/claude-opus-4-5",
+    defaultModel: DEFAULT_MODEL,
   },
   anthropic: {
     name: "Anthropic",
@@ -240,7 +242,7 @@ async function runInstall() {
   const isAppInstalled = await checkAppInstallation(targetRepo);
 
   if (isAppInstalled) {
-    spinner.stop("ask-bonk GitHub App is already installed");
+    spinner.stop(`${GITHUB_APP_SLUG} GitHub App is already installed`);
   } else {
     spinner.stop("GitHub App not installed");
     p.log.info(`Install the app: ${GITHUB_APP_URL}`);
@@ -394,9 +396,11 @@ async function runWorkflow(
       KEY_NAME: config.keyName,
       MENTIONS: config.mentions || "",
       MENTIONS_CHECK: buildMentionsCheck(config.mentions || ""),
+      OIDC_BASE_URL_YML_INJECTION: process.env.OIDC_BASE_URL ? `\n          oidc_base_url: "${process.env.OIDC_BASE_URL}"` : "",
       PROMPT: config.prompt || "",
       CRON: config.cron || "0 0 * * 1",
       PERMISSIONS: config.permissions,
+      BONK_REPO: process.env.BONK_REPO || "ask-bonk/ask-bonk",
       BOT_COMMAND,
       BOT_MENTION,
       EVENTS: config.events
@@ -664,7 +668,7 @@ async function buildCustomWorkflow(providerConfig?: ProviderConfig): Promise<Wor
       initialValue: `${BOT_COMMAND},${BOT_MENTION}`,
       validate: (v) => {
         if (!v || v.length === 0) return "At least one mention is required";
-        if (/[^a-zA-Z0-9@\/,\s._-]/.test(v))
+        if (/[^a-zA-Z0-9@/,\s._-]/.test(v))
           return "Mentions may only contain letters, numbers, @, /, -, _, .";
         return undefined;
       },
