@@ -29,11 +29,11 @@ import {
   workflowExists,
 } from "./github";
 import {
-  GITHUB_APP_SLUG,
-  GITHUB_APP_URL,
-  DEFAULT_MODEL,
-  BOT_MENTION,
   BOT_COMMAND,
+  BOT_MENTION,
+  BONK_REPO,
+  GITHUB_APP_SLUG,
+  OIDC_BASE_URL as DEFAULT_OIDC_BASE_URL,
 } from "./constants";
 
 type ProviderChoice = "opencode-zen" | "anthropic" | "openai" | "other";

@@ -11,6 +11,12 @@ import {
 } from "./github";
 import workflowTemplate from "../cli/templates/bonk.yml.hbs";
 import { createLogger } from "./log";
+import {
+  BOT_MENTION as DEFAULT_BOT_MENTION,
+  BOT_COMMAND as DEFAULT_BOT_COMMAND,
+  GITHUB_REPO_URL as DEFAULT_GITHUB_REPO_URL,
+  DEFAULT_MODEL,
+} from "./constants";
 
 const WORKFLOW_FILE_PATH = ".github/workflows/bonk.yml";
 const WORKFLOW_BRANCH = "bonk/add-workflow-file";
@@ -21,19 +27,21 @@ export interface SetupResult {
   prNumber?: number;
 }
 
-const BOT_MENTION = "@ask-bonk";
-const BOT_COMMAND = "/bonk";
-
 function generateWorkflowContent(env: Env): string {
-  const mention = env.BOT_MENTION || BOT_MENTION;
-  const command = env.BOT_COMMAND || BOT_COMMAND;
+  const mention = env.BOT_MENTION || DEFAULT_BOT_MENTION;
+  const command = env.BOT_COMMAND || DEFAULT_BOT_COMMAND;
   const model = env.DEFAULT_MODEL || DEFAULT_MODEL;
+
+  const repo = (env.GITHUB_REPO_URL || DEFAULT_GITHUB_REPO_URL).replace(
+    "https://github.com/",
+    "",
+  );
 
   return workflowTemplate
     .replace(/\{\{BOT_MENTION\}\}/g, mention)
     .replace(/\{\{BOT_COMMAND\}\}/g, command)
     .replace(/\{\{MODEL\}\}/g, model)
-    .replace(/\{\{BONK_REPO\}\}/g, env.GITHUB_REPO_URL ? env.GITHUB_REPO_URL.replace("https://github.com/", "") : "ask-bonk/ask-bonk");
+    .replace(/\{\{BONK_REPO\}\}/g, repo);
 }
 
 // Check if workflow file exists, create PR if not
@@ -43,6 +51,7 @@ export async function ensureWorkflowFile(
   repo: string,
   issueNumber: number,
   defaultBranch: string,
+  env: Env,
 ): Promise<SetupResult> {
   const workflowLog = createLogger({ owner, repo, issue_number: issueNumber });
   const hasWorkflow = await fileExists(octokit, owner, repo, WORKFLOW_FILE_PATH);
@@ -62,6 +71,7 @@ async function createWorkflowPR(
   repo: string,
   issueNumber: number,
   defaultBranch: string,
+  env: Env,
 ): Promise<SetupResult> {
   const workflowLog = createLogger({ owner, repo, issue_number: issueNumber });
   const existingPR = await findOpenPR(octokit, owner, repo, WORKFLOW_BRANCH);
