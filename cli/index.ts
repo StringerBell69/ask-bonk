@@ -28,15 +28,9 @@ import {
   waitForAppInstallation,
   workflowExists,
 } from "./github";
-import {
-  BOT_COMMAND,
-  BOT_MENTION,
-  BONK_REPO,
-  GITHUB_APP_SLUG,
-  GITHUB_APP_URL,
   DEFAULT_MODEL,
   OIDC_BASE_URL as DEFAULT_OIDC_BASE_URL,
-} from "./constants";
+} from "../src/constants";
 
 type ProviderChoice = "opencode-zen" | "anthropic" | "openai" | "other";
 type WorkflowPreset = "bonk" | "scheduled" | "triage" | "review" | "custom";
