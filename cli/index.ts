@@ -400,7 +400,9 @@ async function runWorkflow(
       KEY_NAME: config.keyName,
       MENTIONS: config.mentions || "",
       MENTIONS_CHECK: buildMentionsCheck(config.mentions || ""),
-      OIDC_BASE_URL_YML_INJECTION: process.env.OIDC_BASE_URL ? `\n          oidc_base_url: "${process.env.OIDC_BASE_URL}"` : "",
+      OIDC_BASE_URL_YML_INJECTION: process.env.OIDC_BASE_URL
+        ? `\n          oidc_base_url: "${DEFAULT_OIDC_BASE_URL}"`
+        : "",
       PROMPT: config.prompt || "",
       CRON: config.cron || "0 0 * * 1",
       PERMISSIONS: config.permissions,
