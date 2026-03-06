@@ -1,5 +1,5 @@
 import type { Octokit } from "@octokit/rest";
-import { DEFAULT_MODEL, type Env } from "./types";
+import { type Env } from "./types";
 import {
   createComment,
   fileExists,

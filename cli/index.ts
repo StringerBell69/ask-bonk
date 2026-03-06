@@ -33,6 +33,8 @@ import {
   BOT_MENTION,
   BONK_REPO,
   GITHUB_APP_SLUG,
+  GITHUB_APP_URL,
+  DEFAULT_MODEL,
   OIDC_BASE_URL as DEFAULT_OIDC_BASE_URL,
 } from "./constants";
 
