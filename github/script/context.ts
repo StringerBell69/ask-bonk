@@ -2,6 +2,10 @@
 // Provides a similar interface to actions/github-script's context object
 
 import { fetchWithRetry } from "./http";
+import {
+  OIDC_BASE_URL as DEFAULT_OIDC_BASE_URL,
+  GITHUB_APP_SLUG as DEFAULT_GITHUB_APP_SLUG,
+} from "../../src/constants";
 
 export interface Repo {
   owner: string;
@@ -31,6 +35,7 @@ export interface Context {
   actor: string;
   ref: string;
   defaultBranch: string;
+  githubAppSlug: string;
 }
 
 export interface Core {
@@ -99,6 +104,7 @@ export function getContext(): Context {
     actor: process.env.GITHUB_ACTOR || "",
     ref: process.env.GITHUB_REF || "",
     defaultBranch: process.env.DEFAULT_BRANCH || "main",
+    githubAppSlug: process.env.GITHUB_APP_SLUG || DEFAULT_GITHUB_APP_SLUG,
   };
 }
 
@@ -159,7 +165,7 @@ export async function getOidcToken(audience: string = "opencode-github-action"):
 
 // Get API base URL from OIDC base URL
 export function getApiBaseUrl(): string {
-  const oidcBaseUrl = process.env.OIDC_BASE_URL;
+  const oidcBaseUrl = process.env.OIDC_BASE_URL || DEFAULT_OIDC_BASE_URL;
   if (!oidcBaseUrl) {
     throw new Error("OIDC_BASE_URL not set");
   }

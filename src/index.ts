@@ -56,11 +56,10 @@ import {
   eventsByActorQuery,
 } from "./metrics";
 import { log, createLogger, sanitizeSecrets } from "./log";
+import { GITHUB_REPO_URL } from "./constants";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { RepoAgent };
-
-const GITHUB_REPO_URL = "https://github.com/ask-bonk/ask-bonk";
 
 function isAllowedOrg(owner: string, env: Env): boolean {
   const allowed = env.ALLOWED_ORGS ?? [];
